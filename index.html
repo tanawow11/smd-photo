@@ -41,3 +41,170 @@
   .modal.on{display:flex}
   .modal .card{width:100%;max-width:440px}
   .cropBox{position:relative;width:min(340px,80vw);height:min(340px,80vw);margin:12px auto 10px;overflow:hidden;
+           border-radius:14px;background:#222;touch-action:none;cursor:grab;outline:3px solid var(--blue-s)}
+  .cropBox img{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;pointer-events:none;max-width:none}
+  .zoom{display:flex;align-items:center;gap:10px;margin:0 4px 14px}
+  .zoom input{flex:1}
+  footer{text-align:center;margin-top:18px;font-size:.85rem}
+  footer a{color:var(--blue-i)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="gbar"></div>
+  <header>
+    <img src="https://i.postimg.cc/bwx2TLW9/Happy-Bad-Dog.png" alt="SMD">
+    <div class="title"><span class="t1">SMD</span> <span class="t2">Staff</span> <span class="t3">Directory</span> &amp; <span class="t4">Birthdays</span></div>
+  </header>
+
+  <div class="card">
+    <h2>📷 อัปโหลดรูปของคุณ</h2>
+    <div id="who" class="muted">กำลังตรวจสอบลิงก์…</div>
+    <div class="prev" id="prev">👤</div>
+    <div class="msg" id="msg"></div>
+    <label class="btn pri hide" id="pickBtn">
+      <span id="pickTxt">📷 เลือกรูป</span>
+      <input type="file" accept="image/*" class="hide" id="file">
+    </label>
+    <div class="tips">
+      ✔ หน้าตรง เห็นหน้าชัด แสงสว่าง<br>
+      ✔ พื้นหลังเรียบ รูปปัจจุบัน<br>
+      ✔ ไม่สวมแว่นดำ / หน้ากาก / หมวก<br>
+      🔒 ลิงก์นี้เป็นลิงก์ส่วนตัวของคุณ กรุณาอย่าส่งต่อ
+    </div>
+  </div>
+  <footer id="foot"></footer>
+</div>
+
+<!-- crop -->
+<div class="modal" id="cropModal">
+  <div class="card">
+    <h2>✂️ จัดตำแหน่งรูป</h2>
+    <div class="muted small">ลากรูปเพื่อเลื่อน · ใช้แถบด้านล่างเพื่อซูม</div>
+    <div class="cropBox" id="cropBox"><img id="cropImg" alt="" draggable="false"></div>
+    <div class="zoom"><span>➖</span><input type="range" id="zoom" min="1" max="4" step="0.01" value="1"><span>➕</span></div>
+    <button class="btn pri" id="saveBtn">💾 บันทึกรูป</button>
+    <button class="btn" id="cancelBtn">ยกเลิก</button>
+  </div>
+</div>
+
+<script>
+/* ลิงก์ web app (Apps Script) — ต้องตรงกับ APP_URL ใน Mail.gs */
+const API = 'https://script.google.com/macros/s/AKfycbw8RTp5CoJxgn8iQiSVaUmb_Q_cais7NhCSGglrS-kQzL9VSl-jp0bcihP2dt6z37tKMQ/exec';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const q = new URLSearchParams(location.search);
+const KEY = q.get('up') || '', TOK = q.get('t') || '';
+
+$('foot').innerHTML = '<a href="' + API + '" target="_blank" rel="noopener">เปิดระบบ SMD Staff Directory &amp; Birthdays →</a>';
+
+async function api(body){
+  let r;
+  try {
+    r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+  } catch (e) { throw new Error('เชื่อมต่อไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่'); }
+  let j;
+  try { j = await r.json(); } catch (e) { throw new Error('ระบบไม่ตอบกลับ กรุณาลองใหม่อีกครั้ง'); }
+  if (!j.ok) throw new Error(j.error || 'เกิดข้อผิดพลาด');
+  return j.data;
+}
+function setMsg(html, cls){ const m = $('msg'); m.className = 'msg' + (cls ? ' ' + cls : ''); m.innerHTML = html; }
+function showPhoto(src){
+  $('prev').innerHTML = src ? '<img alt="" src="' + src + '">' : '👤';
+  $('pickTxt').textContent = src ? '📷 เปลี่ยนรูป' : '📷 เลือกรูป';
+}
+
+// ---------- start ----------
+(async function(){
+  if (!/^[0-9a-f]{16}$/.test(KEY) || !TOK){
+    $('who').innerHTML = '';
+    setMsg('❌ ลิงก์ไม่ถูกต้อง กรุณากดปุ่มอัปโหลดจากอีเมลของคุณอีกครั้ง', 'bad');
+    return;
+  }
+  try {
+    const info = await api({ action: 'info', key: KEY, t: TOK });
+    $('who').innerHTML = 'สวัสดี คุณ<b>' + esc(info.nick) + '</b><br><span class="small">' + esc(info.name)
+      + (info.dept ? ' · ' + esc(info.dept) : '') + '</span>';
+    showPhoto(info.photo || '');
+    $('pickBtn').classList.remove('hide');
+  } catch (e) {
+    $('who').innerHTML = '';
+    setMsg('❌ ' + esc(e.message), 'bad');
+  }
+})();
+
+// ---------- choose + crop ----------
+let CROP = null;
+$('file').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  const url = URL.createObjectURL(f), img = new Image();
+  img.onload = () => { img._url = url; cropOpen(img); };
+  img.onerror = () => { URL.revokeObjectURL(url); setMsg('❌ เปิดรูปนี้ไม่ได้ ลองใช้ไฟล์ JPG หรือ PNG', 'bad'); };
+  img.src = url;
+});
+function cropOpen(img){
+  setMsg('');
+  $('cropModal').classList.add('on');
+  const box = $('cropBox').clientWidth, w = img.naturalWidth, h = img.naturalHeight;
+  const base = box / Math.min(w, h);
+  CROP = { img, box, base, z: 1, x: (box - w * base) / 2, y: h > w ? -(h * base - box) * 0.3 : 0 };
+  const el = $('cropImg'); el.src = img.src; el.style.width = w + 'px'; el.style.height = h + 'px';
+  $('zoom').value = 1; render();
+}
+const scale = () => CROP.base * CROP.z;
+function render(){
+  const s = scale(), w = CROP.img.naturalWidth * s, h = CROP.img.naturalHeight * s;
+  CROP.x = Math.min(0, Math.max(CROP.box - w, CROP.x));
+  CROP.y = Math.min(0, Math.max(CROP.box - h, CROP.y));
+  $('cropImg').style.transform = 'translate(' + CROP.x + 'px,' + CROP.y + 'px) scale(' + s + ')';
+}
+function zoomTo(z, cx, cy){
+  if (!CROP) return;
+  z = Math.min(4, Math.max(1, z));
+  if (cx === undefined){ cx = CROP.box / 2; cy = CROP.box / 2; }
+  const s0 = scale(), px = (cx - CROP.x) / s0, py = (cy - CROP.y) / s0;
+  CROP.z = z; const s1 = scale();
+  CROP.x = cx - px * s1; CROP.y = cy - py * s1;
+  $('zoom').value = z; render();
+}
+$('zoom').addEventListener('input', e => zoomTo(+e.target.value));
+(function(){
+  const box = $('cropBox'); let d = null;
+  box.addEventListener('pointerdown', e => { if (!CROP) return; d = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x: CROP.x, y: CROP.y }; box.setPointerCapture(e.pointerId); });
+  box.addEventListener('pointermove', e => { if (!d || !CROP || e.pointerId !== d.id) return; CROP.x = d.x + e.clientX - d.sx; CROP.y = d.y + e.clientY - d.sy; render(); });
+  const end = () => { d = null; };
+  box.addEventListener('pointerup', end); box.addEventListener('pointercancel', end);
+  box.addEventListener('wheel', e => { if (!CROP) return; e.preventDefault(); const r = box.getBoundingClientRect();
+    zoomTo(CROP.z * (e.deltaY < 0 ? 1.08 : 1 / 1.08), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+})();
+function cropClose(){ $('cropModal').classList.remove('on'); if (CROP && CROP.img._url) URL.revokeObjectURL(CROP.img._url); CROP = null; }
+$('cancelBtn').addEventListener('click', cropClose);
+function cut(img, sx, sy, side, size, quality){
+  const out = Math.max(1, Math.round(Math.min(size, side)));
+  const c = document.createElement('canvas'); c.width = out; c.height = out;
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out, out);
+  ctx.drawImage(img, sx, sy, side, side, 0, 0, out, out);
+  return c.toDataURL('image/jpeg', quality);
+}
+$('saveBtn').addEventListener('click', async () => {
+  if (!CROP) return;
+  const s = scale(), sx = -CROP.x / s, sy = -CROP.y / s, side = CROP.box / s;
+  const big = cut(CROP.img, sx, sy, side, 1200, 0.85), small = cut(CROP.img, sx, sy, side, 160, 0.8);
+  cropClose();
+  $('pickBtn').classList.add('hide');
+  setMsg('⏳ กำลังบันทึกรูป…');
+  try {
+    await api({ action: 'save', key: KEY, t: TOK, big, small });
+    showPhoto(big);
+    setMsg('✅ <b>บันทึกรูปเรียบร้อย ขอบคุณค่ะ</b><br><span class="small">ต้องการเปลี่ยนรูป กดลิงก์เดิมได้ทุกเมื่อ</span>', 'ok');
+  } catch (e) {
+    setMsg('❌ ' + esc(e.message), 'bad');
+  }
+  $('pickBtn').classList.remove('hide');
+});
+</script>
+</body>
+</html>
